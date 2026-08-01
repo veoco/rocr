@@ -1,0 +1,24 @@
+[package]
+name = "rocr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description.workspace = true
+
+[dependencies]
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
+clipper2-rust = { workspace = true }
+image = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+default = []
+# Enable CUDA backend (requires a CUDA-capable GPU and the CUDA toolkit).
+cuda = ["candle-core/cuda", "candle-nn/cuda"]
+# Enable Apple Metal backend (macOS only).
+metal = ["candle-core/metal", "candle-nn/metal"]
+# Enable Apple Accelerate SIMD for CPU inference on macOS.
+accelerate = ["candle-core/accelerate", "candle-nn/accelerate"]

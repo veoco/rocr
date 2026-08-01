@@ -1,0 +1,17 @@
+[package]
+name = "rocr-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Command-line OCR tool built on the rocr library"
+
+[[bin]]
+name = "rocr"
+path = "src/main.rs"
+
+[dependencies]
+rocr = { path = "../rocr" }
+anyhow = { workspace = true }
+clap = { workspace = true }
+image = { workspace = true }
+serde_json = { workspace = true }

@@ -1,0 +1,27 @@
+Third-Party Notices
+===================
+
+rocr does not redistribute any third-party model weights. Users download them
+separately from Hugging Face under their own license terms.
+
+The following third-party materials are used at runtime from user-provided
+files and are not part of this repository:
+
+PP-OCRv6 model family (text detection / recognition models)
+-----------------------------------------------------------
+  Source:      PaddlePaddle on Hugging Face
+               (https://huggingface.co/PaddlePaddle/PP-OCRv6_{tiny,small,medium}_{det,rec}_safetensors)
+  Project:     PaddleOCR (https://github.com/PaddlePaddle/PaddleOCR)
+  Copyright:   (c) 2025 PaddlePaddle Authors
+  License:     Apache License 2.0
+
+PP-LCNet text-line orientation classifier
+-----------------------------------------
+  Source:      PaddleX / PaddleOCR optional module
+               (PP-LCNet_x0_25_textline_ori)
+  Project:     PaddleOCR (https://github.com/PaddlePaddle/PaddleOCR)
+  License:     Apache License 2.0
+
+The architecture of the PP-OCRv6 models was reimplemented in Rust from the
+published model descriptions and official inference graph files
+(`inference.yml`). No third-party source code is copied into rocr.

@@ -1,0 +1,20 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+
+# Development model downloads (never committed)
+/dev-models/
+/.hf-cache/
+
+# Model weight / graph files (users download these manually)
+*.safetensors
+*.onnx
+*.pdmodel
+*.pdiparams
+*.npz
+*.npy
+
+# Python oracle tooling
+__pycache__/
+.venv/
+*.pyc
