@@ -37,11 +37,17 @@ for t in "${TIERS[@]}"; do
     done
 done
 
-# Text-line orientation classifier (optional module).
-download "PaddlePaddle/PP-LCNet_x0_25_textline_ori_safetensors" || echo "warning: optional orient model download failed"
+# Text-line orientation classifiers (optional module). x1_0 is the PaddleOCR
+# default; x0_25 is the lighter alternative selectable via the config option.
+download "PaddlePaddle/PP-LCNet_x1_0_textline_ori_safetensors" || echo "warning: optional orient model download failed"
+download "PaddlePaddle/PP-LCNet_x0_25_textline_ori_safetensors" || echo "warning: optional x0_25 orient model download failed"
 
 # Document orientation classifier (optional module).
 download "PaddlePaddle/PP-LCNet_x1_0_doc_ori_safetensors" || echo "warning: optional doc-orient model download failed"
+
+# Document unwarping (optional module, default off).
+download "PaddlePaddle/UVDoc_safetensors" || echo "warning: optional UVDoc model download failed"
+download "PaddlePaddle/UVDoc_onnx" || echo "warning: optional UVDoc ONNX download failed"
 
 echo
 echo "Done. Models are in: $DEST"

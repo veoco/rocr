@@ -11,6 +11,7 @@ use candle_core::Tensor;
 use rocr::common::preprocess::{det_preprocess, max_abs_diff, rec_preprocess};
 use rocr::det::DetModel;
 use rocr::rec::RecModel;
+use rocr::unwarp::{grid_sample2d, UVDoc};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
@@ -249,6 +250,39 @@ fn textline_orient_matches_paddle() {
     }
 }
 
+// Same parity check for the x1_0 textline-orientation model, which is rocr's
+// default (matching PaddleOCR). Fixture produced by `scripts/verify_textline_ori.py`.
+#[test]
+fn textline_orient_x1_matches_paddle() {
+    let base = workspace_root().join("dev-models").join("reference");
+    let repo = workspace_root()
+        .join("dev-models")
+        .join("PP-LCNet_x1_0_textline_ori_safetensors");
+    if !repo.exists() {
+        eprintln!("skip: x1 orient model repo not present");
+        return;
+    }
+    let model = rocr::PpLcNet::new(&repo, &candle_core::Device::Cpu).unwrap();
+    for tag in ["cn", "cn_rot", "en"] {
+        let input = base.join(format!("paddle_orient_x1_input_{tag}.npy"));
+        let output = base.join(format!("paddle_orient_x1_output_{tag}.npy"));
+        if !input.exists() || !output.exists() {
+            eprintln!("skip: x1 orient fixture {tag} not present");
+            continue;
+        }
+        let x = Tensor::read_npy(&input).unwrap();
+        let out = model.forward(&x).unwrap();
+        let ref_out = Tensor::read_npy(&output).unwrap();
+        assert_eq!(out.dims(), ref_out.dims(), "{tag}: output shape mismatch");
+        let diff = max_abs_diff(&out, &ref_out).unwrap();
+        eprintln!("orient x1 {tag} logits diff = {diff}");
+        assert!(
+            diff < 1e-2,
+            "{tag}: x1 orient deviates from transformers reference: max|diff|={diff}"
+        );
+    }
+}
+
 // The orientation classifier should rotate an upside-down crop and keep an
 // upright one as-is.
 #[test]
@@ -347,6 +381,130 @@ fn doc_orient_rotates_pages() {
         rocr::orient::classify_doc(&model, &img.rotate90()).unwrap(),
         1
     );
+}
+
+// UVDoc document unwarping. Fixtures produced by the official
+// `PaddlePaddle/UVDoc_onnx` export via `scripts/verify_uvdoc_onnx.py` (which
+// also extracts the network input, predicted grid and grid_sample IO).
+#[test]
+fn unwarp_network_matches_onnx() {
+    let base = workspace_root().join("dev-models").join("reference");
+    let repo = workspace_root().join("dev-models").join("UVDoc_safetensors");
+    if !repo.exists() {
+        eprintln!("skip: UVDoc model repo not present");
+        return;
+    }
+    let model = UVDoc::new(&repo, &candle_core::Device::Cpu).unwrap();
+    for name in ["doc", "line_long"] {
+        let input = base.join(format!("paddle_unwarp_{name}_network_input.npy"));
+        let output = base.join(format!("paddle_unwarp_{name}_grid.npy"));
+        if !input.exists() || !output.exists() {
+            eprintln!("skip: unwarp fixture {name} not present");
+            continue;
+        }
+        let x = Tensor::read_npy(&input).unwrap();
+        let out = model.forward(&x).unwrap();
+        let ref_out = Tensor::read_npy(&output).unwrap();
+        assert_eq!(out.dims(), ref_out.dims(), "{name}: output shape mismatch");
+        let diff = max_abs_diff(&out, &ref_out).unwrap();
+        eprintln!("unwarp {name} grid diff = {diff}");
+        assert!(
+            diff < 1e-3,
+            "{name}: unwarp network deviates from ONNX: max|diff|={diff}"
+        );
+    }
+}
+
+// The `grid_sample` helper is validated against the ONNX `GridSample` node's
+// own inputs/outputs (extracted for the doc image), so it is correct in
+// isolation before combining with the predicted grid.
+#[test]
+fn unwarp_grid_sample_matches_onnx() {
+    let base = workspace_root().join("dev-models").join("reference");
+    let (i, g, o) = ("uvdoc_gs_input.npy", "uvdoc_gs_grid.npy", "uvdoc_gs_output.npy");
+    let paths: Vec<_> = [i, g, o].iter().map(|f| base.join(f)).collect();
+    if !paths.iter().all(|p| p.exists()) {
+        eprintln!("skip: grid_sample reference not present");
+        return;
+    }
+    let input = Tensor::read_npy(&paths[0]).unwrap();
+    let grid = Tensor::read_npy(&paths[1]).unwrap();
+    let ref_out = Tensor::read_npy(&paths[2]).unwrap();
+    let out = grid_sample2d(&input, &grid).unwrap();
+    assert_eq!(out.dims(), ref_out.dims(), "grid_sample output shape mismatch");
+    let diff = max_abs_diff(&out, &ref_out).unwrap();
+    eprintln!("grid_sample diff = {diff}");
+    assert!(
+        diff < 1e-4,
+        "grid_sample deviates from ONNX GridSample: max|diff|={diff}"
+    );
+}
+
+// End-to-end: unwarp_image produces the same rectified image as the ONNX graph.
+// The tolerance is larger because the result is quantized to u8 (0..255) and
+// the predicted grid differs from ONNX by float round-off, which image
+// gradients amplify by a few pixel values; the network and grid_sample are
+// checked tightly above.
+#[test]
+fn unwarp_end_to_end_matches_onnx() {
+    let base = workspace_root().join("dev-models").join("reference");
+    let repo = workspace_root().join("dev-models").join("UVDoc_safetensors");
+    if !repo.exists() {
+        eprintln!("skip: UVDoc model repo not present");
+        return;
+    }
+    let model = UVDoc::new(&repo, &candle_core::Device::Cpu).unwrap();
+    for name in ["doc", "line_long"] {
+        let img_path = assets_dir().join(format!("{name}.png"));
+        let ref_path = base.join(format!("paddle_unwarp_{name}_output.npy"));
+        if !img_path.exists() || !ref_path.exists() {
+            eprintln!("skip: unwarp e2e fixture {name} not present");
+            continue;
+        }
+        let img = image::open(&img_path).unwrap();
+        let out = model.unwarp_image(&img).unwrap();
+        let (h, w) = (out.height() as usize, out.width() as usize);
+        let rgb = out.to_rgb8();
+        let mut chw = vec![0f32; 3 * h * w];
+        for (i, p) in rgb.as_raw().chunks_exact(3).enumerate() {
+            chw[i] = p[0] as f32;
+            chw[h * w + i] = p[1] as f32;
+            chw[2 * h * w + i] = p[2] as f32;
+        }
+        let t = Tensor::from_vec(chw, (1, 3, h, w), &candle_core::Device::Cpu).unwrap();
+        let ref_out = Tensor::read_npy(&ref_path).unwrap();
+        assert_eq!(t.dims(), ref_out.dims(), "{name}: output shape mismatch");
+        let diff = max_abs_diff(&t, &ref_out).unwrap();
+        eprintln!("unwarp {name} end-to-end diff = {diff}");
+        assert!(
+            diff < 2.0,
+            "{name}: unwarp output deviates from ONNX: max|diff|={diff}"
+        );
+    }
+}
+
+// With doc unwarping enabled, the full pipeline (doc orient → unwarp → det →
+// rec) must still run end-to-end on a page. Requires the UVDoc model repo.
+#[test]
+fn full_pipeline_with_doc_unwarping() {
+    let base = workspace_root().join("dev-models");
+    if !base.join("UVDoc_safetensors").exists() {
+        eprintln!("skip: UVDoc model not present");
+        return;
+    }
+    use rocr::{DeviceKind, ModelTier, Ocr, OcrConfig};
+    let ocr = Ocr::new(OcrConfig {
+        model_tier: ModelTier::Small,
+        device: DeviceKind::Cpu,
+        model_dir: base,
+        enable_doc_unwarping: true,
+        ..Default::default()
+    })
+    .unwrap();
+    let img = image::open(assets_dir().join("doc.png")).unwrap();
+    let results = ocr.recognize(&img).unwrap();
+    eprintln!("unwarp pipeline: {} text lines recognized", results.len());
+    assert!(!results.is_empty(), "no text recognized with unwarping");
 }
 
 #[test]

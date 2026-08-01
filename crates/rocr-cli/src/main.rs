@@ -28,6 +28,10 @@ struct Args {
     #[arg(long)]
     doc_orientation: bool,
 
+    /// Enable document unwarping / rectification (UVDoc), default off.
+    #[arg(long)]
+    doc_unwarping: bool,
+
     /// Disable text-line orientation classification (on by default).
     #[arg(long)]
     no_textline_orientation: bool,
@@ -86,6 +90,7 @@ fn main() -> anyhow::Result<()> {
         device: args.device.into(),
         model_dir: args.model_dir,
         enable_doc_orientation: args.doc_orientation,
+        enable_doc_unwarping: args.doc_unwarping,
         enable_textline_orientation: !args.no_textline_orientation,
         ..Default::default()
     };

@@ -2,16 +2,17 @@
 
 纯 Rust 实现的 OCR 库，基于 PaddlePaddle 的 **PP-OCRv6** 模型。推理引擎使用 [candle](https://github.com/huggingface/candle)，无 C++ 依赖。
 
-> 状态：开发中。**检测、识别、文本行方向分类与文档方向分类均已实现，并通过与 PaddleOCR transformers 引擎 / ONNX oracle 的数值验证**（中英文混排文档端到端识别正确）。
+> 状态：开发中。**检测、识别、文本行方向分类、文档方向分类与文档矫正/展开（UVDoc）均已实现，并通过与 PaddleOCR transformers 引擎 / ONNX oracle 的数值验证**（中英文混排文档端到端识别正确）。
 
-**档位支持**：Tiny / Small / Medium 三档全部可用（检测 + 识别 + 管线 + CLI），均通过与 PaddleOCR transformers 引擎 / ONNX oracle 的数值验证。三档中英文混排文档端到端识别正确，倒置（180°）文本行自动校正，旋转文档页（0/90/180/270°）可自动摆正。
+**档位支持**：Tiny / Small / Medium 三档全部可用（检测 + 识别 + 管线 + CLI），均通过与 PaddleOCR transformers 引擎 / ONNX oracle 的数值验证。三档中英文混排文档端到端识别正确，倒置（180°）文本行自动校正，旋转文档页（0/90/180/270°）可自动摆正，弯曲页面可矫正展开。
 
 ## 特性
 
 - **纯 Rust 推理**：candle 张量库，无 ONNX Runtime / C++ 后端
 - **PP-OCRv6**：检测（PPLCNetV4 + RepLKFPN + DB 头）+ 识别（PPLCNetV4 + LightSVTR + CTC）
-- **文本行方向分类**：PP-LCNet_x0_25（0°/180°），倒置文本行自动旋转校正
+- **文本行方向分类**：PP-LCNet_x1_0（0°/180°），倒置文本行自动旋转校正（默认）
 - **文档方向分类**：PP-LCNet_x1_0_doc_ori（0/90/180/270°），旋转页面自动摆正（默认关闭）
+- **文档矫正/展开**：UVDoc，弯曲页面自动矫正（默认关闭）
 - **三档模型**：Tiny / Small / Medium，同一份代码由 config 参数化
 - **多语言**：单模型支持 50 种语言
 - **多平台**：CPU、CUDA、Apple Metal（通过 feature flags）
@@ -44,14 +45,20 @@ cargo build --release --features rocr/accelerate  # macOS CPU 加速
 model-dir/
 ├── PP-OCRv6_small_det_safetensors/           # 检测模型（tier 为 small 时）
 ├── PP-OCRv6_small_rec_safetensors/           # 识别模型
-├── PP-LCNet_x0_25_textline_ori_safetensors/  # 文本行方向分类（跨档位共用）
-└── PP-LCNet_x1_0_doc_ori_safetensors/        # 文档方向分类（可选，默认关闭）
+├── PP-LCNet_x1_0_textline_ori_safetensors/   # 文本行方向分类（默认，跨档位共用）
+├── PP-LCNet_x0_25_textline_ori_safetensors/  # 轻量替代（可选）
+├── PP-LCNet_x1_0_doc_ori_safetensors/        # 文档方向分类（可选，默认关闭）
+└── UVDoc_safetensors/                        # 文档矫正/展开（可选，默认关闭）
 ```
 
 不同档位（tiny / small / medium）对应不同仓库名，`--model` 选择档位。
-方向分类模型固定仓库名：`PP-LCNet_x0_25_textline_ori_safetensors`（默认开启）与
-`PP-LCNet_x1_0_doc_ori_safetensors`（默认关闭，CLI 加 `--doc-orientation`，库接口设
-`OcrConfig.enable_doc_orientation = true`；关闭可用 `--no-textline-orientation`）。
+方向分类模型仓库名：文本行方向默认 `PP-LCNet_x1_0_textline_ori_safetensors`（PaddleOCR
+官方默认，默认开启）；轻量替代 `PP-LCNet_x0_25_textline_ori_safetensors` 可通过库接口
+`OcrConfig.textline_ori_model_name = Some(...)` 选择。文档方向
+`PP-LCNet_x1_0_doc_ori_safetensors` 默认关闭（CLI 加 `--doc-orientation`，库接口设
+`OcrConfig.enable_doc_orientation = true`）。文档矫正/展开 `UVDoc_safetensors` 默认关闭
+（CLI 加 `--doc-unwarping`，库接口设 `OcrConfig.enable_doc_unwarping = true`）。
+关闭文本行方向可用 `--no-textline-orientation`。
 
 ### 下载命令
 
@@ -65,8 +72,10 @@ huggingface-cli download PaddlePaddle/PP-OCRv6_small_rec_safetensors --local-dir
 各档位仓库：
 - `PaddlePaddle/PP-OCRv6_{tiny,small,medium}_det_safetensors`
 - `PaddlePaddle/PP-OCRv6_{tiny,small,medium}_rec_safetensors`
-- `PaddlePaddle/PP-LCNet_x0_25_textline_ori_safetensors`（文本行方向分类，需一个）
+- `PaddlePaddle/PP-LCNet_x1_0_textline_ori_safetensors`（文本行方向分类，默认）
+- `PaddlePaddle/PP-LCNet_x0_25_textline_ori_safetensors`（轻量替代，可选）
 - `PaddlePaddle/PP-LCNet_x1_0_doc_ori_safetensors`（文档方向分类，可选）
+- `PaddlePaddle/UVDoc_safetensors`（文档矫正/展开，可选）
 
 开发/测试环境可用脚本下载到 gitignored 的 `dev-models/`：
 
@@ -88,12 +97,13 @@ CLI 选项：
 - `--device {cpu,cuda,metal}`：推理设备（默认 `cpu`，需对应 feature 编译）
 - `--model-dir <dir>`：模型仓库所在目录
 - `--doc-orientation`：启用文档方向分类（0/90/180/270°），旋转页面自动摆正
+- `--doc-unwarping`：启用文档矫正/展开（UVDoc），弯曲页面自动矫正
 - `--no-textline-orientation`：关闭文本行方向分类（默认开启）
 - `--verbose`：向 stderr 输出模型加载与逐图耗时
 - `--json`：JSON 输出（批量时按文件名分组）
 
 ```bash
-rocr --image a.png --image b.png --model medium --model-dir ./models --doc-orientation --verbose
+rocr --image a.png --image b.png --model medium --model-dir ./models --doc-orientation --doc-unwarping --verbose
 ```
 
 ## 性能

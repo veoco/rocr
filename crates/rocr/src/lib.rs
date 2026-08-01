@@ -78,6 +78,10 @@ pub struct OcrConfig {
     pub enable_doc_unwarping: bool,
     /// Classify each detected text line for 180° rotation. Default on.
     pub enable_textline_orientation: bool,
+    /// Repository name of the text-line orientation model. Defaults to
+    /// `PP-LCNet_x1_0_textline_ori_safetensors` (the PaddleOCR default); set to
+    /// `Some("PP-LCNet_x0_25_textline_ori_safetensors")` for the lighter model.
+    pub textline_ori_model_name: Option<String>,
     /// Directory containing the manually downloaded model repositories.
     pub model_dir: PathBuf,
 }
@@ -90,6 +94,7 @@ impl Default for OcrConfig {
             enable_doc_orientation: false,
             enable_doc_unwarping: false,
             enable_textline_orientation: true,
+            textline_ori_model_name: None,
             model_dir: PathBuf::new(),
         }
     }
@@ -104,21 +109,25 @@ pub struct OcrResult {
     pub polygon: Vec<[f32; 2]>,
 }
 
-/// Repository name of the text-line orientation model (fixed across tiers).
-const TEXTLINE_ORI_REPO: &str = "PP-LCNet_x0_25_textline_ori_safetensors";
+/// Default repository name of the text-line orientation model (fixed across
+/// tiers). The x1_0 model is what PaddleOCR itself uses by default; the lighter
+/// x0_25 variant is available via `OcrConfig::textline_ori_model_name`.
+const TEXTLINE_ORI_REPO: &str = "PP-LCNet_x1_0_textline_ori_safetensors";
 /// Repository name of the document orientation model.
 const DOC_ORI_REPO: &str = "PP-LCNet_x1_0_doc_ori_safetensors";
+/// Repository name of the document unwarping model.
+const UNWARP_REPO: &str = "UVDoc_safetensors";
 
 /// The OCR engine. Owns the loaded detection / recognition models.
 pub struct Ocr {
-    #[allow(dead_code)] // retained for future unwarping modules
-    config: OcrConfig,
     det: DetModel,
     rec: RecModel,
     /// Text-line orientation classifier (0°/180°), applied per crop.
     textline_ori: Option<PpLcNet>,
     /// Document orientation classifier (0°/90°/180°/270°), applied to the page.
     doc_ori: Option<PpLcNet>,
+    /// Document unwarping (UVDoc), applied to the whole page when enabled.
+    unwarp: Option<crate::unwarp::UVDoc>,
 }
 
 impl Ocr {
@@ -147,14 +156,27 @@ impl Ocr {
             }
             Ok(Some(PpLcNet::new(&repo, &device)?))
         };
-        let textline_ori = load_cls(TEXTLINE_ORI_REPO, config.enable_textline_orientation)?;
+        let textline_ori_repo = config
+            .textline_ori_model_name
+            .as_deref()
+            .unwrap_or(TEXTLINE_ORI_REPO);
+        let textline_ori = load_cls(textline_ori_repo, config.enable_textline_orientation)?;
         let doc_ori = load_cls(DOC_ORI_REPO, config.enable_doc_orientation)?;
+        let unwarp = if config.enable_doc_unwarping {
+            let repo = base.join(UNWARP_REPO);
+            if !repo.exists() {
+                return Err(Error::ModelFileMissing(repo.display().to_string()));
+            }
+            Some(crate::unwarp::UVDoc::new(&repo, &device)?)
+        } else {
+            None
+        };
         Ok(Self {
-            config,
             det,
             rec,
             textline_ori,
             doc_ori,
+            unwarp,
         })
     }
 
@@ -172,6 +194,10 @@ impl Ocr {
                 3 => page = page.rotate90(),
                 _ => {}
             }
+        }
+        // Rectify curved pages before detection if unwarping is enabled.
+        if let Some(unwarp) = &self.unwarp {
+            page = unwarp.unwarp_image(&page)?;
         }
         let boxes = self.det.detect(&page)?;
         let mut results = Vec::new();
