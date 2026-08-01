@@ -141,8 +141,8 @@ mod debug_tests {
     #[test]
     fn backbone_matches_oracle() {
         let repo = root().join("dev-models/PP-OCRv6_small_det_safetensors");
-        if !repo.exists() {
-            eprintln!("skip: det repo not present");
+        if !repo.exists() || !root().join("dev-models/reference/det_inter").exists() {
+            eprintln!("skip: det repo or det_inter fixtures not present");
             return;
         }
         let device = Device::Cpu;
@@ -171,8 +171,8 @@ mod debug_tests {
     #[test]
     fn head_and_postprocess_are_correct() {
         let repo = root().join("dev-models/PP-OCRv6_small_det_safetensors");
-        if !repo.exists() {
-            eprintln!("skip: det repo not present");
+        if !repo.exists() || !root().join("dev-models/reference/det_inter").exists() {
+            eprintln!("skip: det repo or det_inter fixtures not present");
             return;
         }
         let device = Device::Cpu;

@@ -195,8 +195,8 @@ mod debug_tests {
     #[test]
     fn compare_stem_and_backbone() {
         let repo = root().join("dev-models/PP-OCRv6_small_rec_safetensors");
-        if !repo.exists() {
-            eprintln!("skip");
+        if !repo.exists() || !root().join("dev-models/reference/rec_inter").exists() {
+            eprintln!("skip: rec repo or rec_inter fixtures not present");
             return;
         }
         let device = Device::Cpu;
