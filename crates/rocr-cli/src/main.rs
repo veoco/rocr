@@ -20,6 +20,11 @@ struct Args {
     #[arg(long, value_enum, default_value_t = DeviceArg::Cpu)]
     device: DeviceArg,
 
+    /// CPU inference threads for candle's internal pool (default 6). The
+    /// default of `num_cpus::get_physical()` is much slower for PP-OCRv6.
+    #[arg(long, default_value_t = 6)]
+    threads: usize,
+
     /// Directory containing the manually downloaded model repositories.
     #[arg(long)]
     model_dir: PathBuf,
@@ -85,6 +90,13 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("at least one --image is required");
     }
 
+    // Explicitly size candle's internal thread pool before any model op
+    // (candle reads RAYON_NUM_THREADS once when its pool is first created).
+    // A user-set RAYON_NUM_THREADS takes precedence over --threads.
+    if std::env::var("RAYON_NUM_THREADS").is_err() {
+        std::env::set_var("RAYON_NUM_THREADS", args.threads.to_string());
+    }
+
     let config = OcrConfig {
         model_tier: args.model.into(),
         device: args.device.into(),
@@ -103,7 +115,22 @@ fn main() -> anyhow::Result<()> {
 
     for path in &args.image {
         let t = std::time::Instant::now();
-        let img = image::open(path)?;
+        // Detect the format from file contents (not the extension): the
+        // PaddleOCR repo ships some `.png` files that are actually JPEG.
+        let img = match image::ImageReader::open(path)
+            .map_err(anyhow::Error::from)
+            .and_then(|r| r.with_guessed_format().map_err(anyhow::Error::from))
+            .and_then(|r| r.decode().map_err(anyhow::Error::from))
+        {
+            Ok(img) => img,
+            Err(e) if args.image.len() > 1 => {
+                // In batch mode a single undecodable image should not abort
+                // the whole run.
+                eprintln!("{}: decode failed: {e}", path.display());
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         let results = ocr.recognize(&img)?;
         if args.json {
             let out = results

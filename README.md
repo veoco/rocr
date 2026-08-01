@@ -99,6 +99,9 @@ CLI 选项：
 - `--doc-orientation`：启用文档方向分类（0/90/180/270°），旋转页面自动摆正
 - `--doc-unwarping`：启用文档矫正/展开（UVDoc），弯曲页面自动矫正
 - `--no-textline-orientation`：关闭文本行方向分类（默认开启）
+- `--threads <n>`：CPU 推理线程数（默认 6）。candle 默认按物理核数建线程池，
+  对 PP-OCRv6 这类卷积密集小算子在多核机器上反而慢一个数量级，请勿随意调高；
+  已设置 `RAYON_NUM_THREADS` 环境变量时以环境变量为准
 - `--verbose`：向 stderr 输出模型加载与逐图耗时
 - `--json`：JSON 输出（批量时按文件名分组）
 
@@ -108,15 +111,22 @@ rocr --image a.png --image b.png --model medium --model-dir ./models --doc-orien
 
 ## 性能
 
-以下为本机（单线程 CPU，release 构建）对一张 900×700 文档图的整页 OCR 耗时：
+以下为本机（CPU，release 构建）对一张 900×700 文档图的整页 OCR 耗时。rocr
+默认将 candle 的线程池限制为 6 线程（见 `--threads`）——candle 默认按物理核数
+建池，在 16 核机器上反而因 barrier 同步开销比 6 线程慢约 12 倍（本机 59 s →
+4.7 s）。
 
 | 档位 | 耗时 |
 |------|------|
 | Tiny  | ~2.9 s |
-| Small | ~5.6 s |
-| Medium| ~14.6 s |
+| Small | ~4.8 s |
+| Medium| ~14.4 s |
 
 实际取决于图片尺寸、文本行数与硬件；CUDA / Metal 后端可显著加速。
+
+与官方 PaddleOCR（torch 引擎）对比：在 900×700 整页文档上 rocr 约慢官方
+单线程 2~3 倍（candle 的纯 Rust conv 实现 vs torch oneDNN/MKL）。这在
+PaddleOCR 官方示例图（`docs/images`、`tests/test_files`）全量对比中表现一致。
 
 ## 许可证
 

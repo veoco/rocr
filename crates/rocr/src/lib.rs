@@ -134,6 +134,7 @@ impl Ocr {
     /// Build an [`Ocr`] engine, loading the detection and recognition models
     /// from `config.model_dir`.
     pub fn new(config: OcrConfig) -> Result<Self, Error> {
+        configure_candle_threads();
         let device = device_from_kind(config.device)?;
         let tier = config.model_tier.as_str();
         let base = &config.model_dir;
@@ -267,6 +268,31 @@ pub(crate) fn crop_polygon(
     Some(img.crop_imm(x0, y0, x1 - x0, y1 - y0))
 }
 
+/// Default CPU thread count for candle's internal thread pool.
+///
+/// candle builds its rayon thread pool lazily on the first tensor op, sized by
+/// `num_cpus::get_physical()`. On machines with many cores this makes the small
+/// convolution-heavy ops of PP-OCRv6 dominated by barrier sync: on a 16-physical-core
+/// host a full-page OCR took ~59 s with the default pool vs ~4.7 s with
+/// 6 threads. Since the pool is only configurable through the environment, we
+/// default to a small pool when the caller has not set `RAYON_NUM_THREADS`.
+const DEFAULT_CANDLE_THREADS: usize = 6;
+
+/// Clamp candle's internal rayon thread pool to a sane default.
+///
+/// Must run before any candle tensor op (candle's pool is a lazy `OnceLock`,
+/// so the env var is only honored if set before the first op). This function
+/// must be called at the top of `Ocr::new`. It is a no-op when the user has
+/// already set `RAYON_NUM_THREADS` themselves.
+fn configure_candle_threads() {
+    // Nothing else touches this env var in rocr; callers can override via the
+    // environment or the CLI. The candle pool is created lazily on the first
+    // op, which happens after this function runs.
+    if std::env::var("RAYON_NUM_THREADS").is_err() {
+        std::env::set_var("RAYON_NUM_THREADS", DEFAULT_CANDLE_THREADS.to_string());
+    }
+}
+
 pub(crate) fn device_from_kind(kind: DeviceKind) -> Result<candle_core::Device, Error> {
     match kind {
         DeviceKind::Cpu => Ok(candle_core::Device::Cpu),
@@ -295,6 +321,15 @@ mod tests {
             h,
             image::Rgb([255, 255, 255]),
         ))
+    }
+
+    #[test]
+    fn configure_candle_threads_sets_default() {
+        // The env var is global; only assert the wiring when we can control it.
+        std::env::remove_var("RAYON_NUM_THREADS");
+        configure_candle_threads();
+        let v = std::env::var("RAYON_NUM_THREADS").unwrap();
+        assert_eq!(v, DEFAULT_CANDLE_THREADS.to_string());
     }
 
     #[test]
