@@ -275,8 +275,10 @@ pub(crate) fn crop_polygon(
 /// convolution-heavy ops of PP-OCRv6 dominated by barrier sync: on a 16-physical-core
 /// host a full-page OCR took ~59 s with the default pool vs ~4.7 s with
 /// 6 threads. Since the pool is only configurable through the environment, we
-/// default to a small pool when the caller has not set `RAYON_NUM_THREADS`.
-const DEFAULT_CANDLE_THREADS: usize = 6;
+/// default to a single thread — the most portable choice (performance across
+/// thread counts is hardware-specific; users who want more should set
+/// `RAYON_NUM_THREADS` or use the CLI `--threads`).
+const DEFAULT_CANDLE_THREADS: usize = 1;
 
 /// Clamp candle's internal rayon thread pool to a sane default.
 ///

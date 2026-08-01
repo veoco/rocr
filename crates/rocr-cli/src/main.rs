@@ -20,9 +20,11 @@ struct Args {
     #[arg(long, value_enum, default_value_t = DeviceArg::Cpu)]
     device: DeviceArg,
 
-    /// CPU inference threads for candle's internal pool (default 6). The
-    /// default of `num_cpus::get_physical()` is much slower for PP-OCRv6.
-    #[arg(long, default_value_t = 6)]
+    /// CPU inference threads for candle's internal pool (default 1). The
+    /// candle default of `num_cpus::get_physical()` is much slower for
+    /// PP-OCRv6 on many-core machines, but the optimal count is
+    /// hardware-specific — try a small number (e.g. 4-8) and benchmark.
+    #[arg(long, default_value_t = 1)]
     threads: usize,
 
     /// Directory containing the manually downloaded model repositories.
