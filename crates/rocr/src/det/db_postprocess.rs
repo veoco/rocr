@@ -366,3 +366,154 @@ fn box_score(data: &[Vec<f32>], poly: &[[f32; 2]]) -> f32 {
         sum / cnt as f32
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use candle_core::{Device, Tensor};
+
+    use super::*;
+
+    fn prob(
+        h: usize,
+        w: usize,
+        regions: &[(usize, usize, usize, usize)],
+        fill: f32,
+    ) -> Vec<Vec<f32>> {
+        let mut m = vec![vec![0.1f32; w]; h];
+        for &(y0, y1, x0, x1) in regions {
+            for row in &mut m[y0..y1] {
+                for cell in &mut row[x0..x1] {
+                    *cell = fill;
+                }
+            }
+        }
+        m
+    }
+
+    #[test]
+    fn connected_components_finds_separate_regions() {
+        // Two isolated 1px seeds at (1,1) and (4,4).
+        let mut data = vec![vec![0.0f32; 6]; 6];
+        data[1][1] = 1.0;
+        data[4][4] = 1.0;
+        let comps = connected_components(6, 6, &data, 0.5);
+        assert_eq!(comps.len(), 2, "expected two components");
+        let sizes: Vec<_> = comps.iter().map(|c| c.len()).collect();
+        assert!(sizes.contains(&1) && sizes.contains(&1));
+    }
+
+    #[test]
+    fn connected_components_8_connectivity_diagonal() {
+        let mut data = vec![vec![0.0f32; 3]; 3];
+        data[0][0] = 1.0;
+        data[1][1] = 1.0; // diagonal neighbor via 8-connectivity
+        let comps = connected_components(3, 3, &data, 0.5);
+        assert_eq!(comps.len(), 1, "diagonal should merge into one component");
+        assert_eq!(comps[0].len(), 2);
+    }
+
+    #[test]
+    fn connected_components_ignores_below_threshold() {
+        let mut data = vec![vec![0.0f32; 3]; 3];
+        data[1][1] = 0.2; // below thresh 0.5
+        assert!(connected_components(3, 3, &data, 0.5).is_empty());
+    }
+
+    #[test]
+    fn convex_hull_of_square_is_corners() {
+        let pts = vec![(0usize, 0usize), (0, 4), (4, 0), (4, 4), (2, 2), (1, 3)];
+        let hull = convex_hull(&pts);
+        assert_eq!(hull.len(), 4, "hull: {hull:?}");
+        let area = polygon_area(&hull);
+        assert!((area - 16.0).abs() < 1e-3, "area {area}");
+    }
+
+    #[test]
+    fn convex_hull_degenerate_points() {
+        let pts = vec![(2usize, 2usize)];
+        assert_eq!(convex_hull(&pts).len(), 1);
+        let pts = vec![(0usize, 0usize), (1usize, 1usize)];
+        assert_eq!(convex_hull(&pts).len(), 2);
+    }
+
+    #[test]
+    fn order_points_returns_tl_tr_br_bl() {
+        let rect = [[4.0, 4.0], [0.0, 4.0], [0.0, 0.0], [4.0, 0.0]];
+        let ordered = order_points(rect);
+        assert_eq!(ordered[0], [0.0, 0.0]); // TL
+        assert_eq!(ordered[1], [4.0, 0.0]); // TR
+        assert_eq!(ordered[2], [4.0, 4.0]); // BR
+        assert_eq!(ordered[3], [0.0, 4.0]); // BL
+    }
+
+    #[test]
+    fn polygon_measurements_known_rectangle() {
+        let rect = [[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0]];
+        assert!((polygon_area(&rect) - 12.0).abs() < 1e-4);
+        assert!((polygon_perimeter(&rect) - 14.0).abs() < 1e-4);
+        assert!((min_side(&rect) - 3.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn point_in_poly_inside_outside() {
+        let tri = [[0.0, 0.0], [4.0, 0.0], [2.0, 4.0]];
+        assert!(point_in_poly(2.0, 1.0, &tri));
+        assert!(!point_in_poly(0.5, 3.0, &tri));
+    }
+
+    #[test]
+    fn box_score_means_probability_inside() {
+        let data = prob(8, 8, &[(2, 6, 2, 6)], 0.9);
+        let rect = [[2.0, 2.0], [6.0, 2.0], [6.0, 6.0], [2.0, 6.0]];
+        let score = box_score(&data, &rect);
+        assert!((score - 0.9).abs() < 1e-4, "score {score}");
+        let empty = vec![vec![0.0f32; 8]; 8];
+        assert_eq!(box_score(&empty, &rect), 0.0);
+    }
+
+    #[test]
+    fn run_detects_single_rect() {
+        let m = prob(12, 12, &[(3, 9, 4, 10)], 0.9);
+        let t = Tensor::from_vec(m.concat(), (12, 12), &Device::Cpu).unwrap();
+        let t = t.unsqueeze(0).unwrap().unsqueeze(0).unwrap();
+        let boxes = DbPostprocess::default().run(&t, &Device::Cpu).unwrap();
+        assert_eq!(boxes.len(), 1, "expected exactly one box: {boxes:?}");
+        // The box should be near the [4..10] x [3..9] region.
+        let min_x = boxes[0].iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+        let max_x = boxes[0]
+            .iter()
+            .map(|p| p[0])
+            .fold(f32::NEG_INFINITY, f32::max);
+        let min_y = boxes[0].iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
+        let max_y = boxes[0]
+            .iter()
+            .map(|p| p[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!((0.0..=5.0).contains(&min_x), "min_x {min_x}");
+        assert!((9.0..=11.0).contains(&max_x), "max_x {max_x}");
+        assert!((0.0..=4.0).contains(&min_y), "min_y {min_y}");
+        assert!((8.0..=10.0).contains(&max_y), "max_y {max_y}");
+    }
+
+    #[test]
+    fn run_empty_map_no_boxes() {
+        let m = vec![vec![0.1f32; 12]; 12];
+        let t = Tensor::from_vec(m.concat(), (12, 12), &Device::Cpu).unwrap();
+        let t = t.unsqueeze(0).unwrap().unsqueeze(0).unwrap();
+        assert!(DbPostprocess::default()
+            .run(&t, &Device::Cpu)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn run_filters_weak_boxes() {
+        // Probability below box_thresh (0.45) but above thresh (0.2): no box.
+        let m = prob(12, 12, &[(3, 9, 4, 10)], 0.3);
+        let t = Tensor::from_vec(m.concat(), (12, 12), &Device::Cpu).unwrap();
+        let t = t.unsqueeze(0).unwrap().unsqueeze(0).unwrap();
+        let boxes = DbPostprocess::default().run(&t, &Device::Cpu).unwrap();
+        // 0.3 < box_thresh → dropped.
+        assert!(boxes.is_empty(), "weak box should be filtered: {boxes:?}");
+    }
+}

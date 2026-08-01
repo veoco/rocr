@@ -389,7 +389,9 @@ fn doc_orient_rotates_pages() {
 #[test]
 fn unwarp_network_matches_onnx() {
     let base = workspace_root().join("dev-models").join("reference");
-    let repo = workspace_root().join("dev-models").join("UVDoc_safetensors");
+    let repo = workspace_root()
+        .join("dev-models")
+        .join("UVDoc_safetensors");
     if !repo.exists() {
         eprintln!("skip: UVDoc model repo not present");
         return;
@@ -421,7 +423,11 @@ fn unwarp_network_matches_onnx() {
 #[test]
 fn unwarp_grid_sample_matches_onnx() {
     let base = workspace_root().join("dev-models").join("reference");
-    let (i, g, o) = ("uvdoc_gs_input.npy", "uvdoc_gs_grid.npy", "uvdoc_gs_output.npy");
+    let (i, g, o) = (
+        "uvdoc_gs_input.npy",
+        "uvdoc_gs_grid.npy",
+        "uvdoc_gs_output.npy",
+    );
     let paths: Vec<_> = [i, g, o].iter().map(|f| base.join(f)).collect();
     if !paths.iter().all(|p| p.exists()) {
         eprintln!("skip: grid_sample reference not present");
@@ -431,7 +437,11 @@ fn unwarp_grid_sample_matches_onnx() {
     let grid = Tensor::read_npy(&paths[1]).unwrap();
     let ref_out = Tensor::read_npy(&paths[2]).unwrap();
     let out = grid_sample2d(&input, &grid).unwrap();
-    assert_eq!(out.dims(), ref_out.dims(), "grid_sample output shape mismatch");
+    assert_eq!(
+        out.dims(),
+        ref_out.dims(),
+        "grid_sample output shape mismatch"
+    );
     let diff = max_abs_diff(&out, &ref_out).unwrap();
     eprintln!("grid_sample diff = {diff}");
     assert!(
@@ -448,7 +458,9 @@ fn unwarp_grid_sample_matches_onnx() {
 #[test]
 fn unwarp_end_to_end_matches_onnx() {
     let base = workspace_root().join("dev-models").join("reference");
-    let repo = workspace_root().join("dev-models").join("UVDoc_safetensors");
+    let repo = workspace_root()
+        .join("dev-models")
+        .join("UVDoc_safetensors");
     if !repo.exists() {
         eprintln!("skip: UVDoc model repo not present");
         return;

@@ -368,3 +368,96 @@ impl Backbone {
         self.stem.forward(x)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use candle_core::{Device, Tensor};
+
+    use super::*;
+
+    fn rand(n: usize, c: usize, h: usize, w: usize) -> Tensor {
+        // Deterministic pseudo-random data in [0,1).
+        let v: Vec<f32> = (0..n * c * h * w)
+            .map(|i| (i as f32 * 7919.0).fract())
+            .collect();
+        Tensor::from_vec(v, (n, c, h, w), &Device::Cpu).unwrap()
+    }
+
+    fn weight(oc: usize, ic: usize, k: usize) -> Tensor {
+        let v: Vec<f32> = (0..oc * ic * k * k)
+            .map(|i| (i as f32 * 104729.0).fract())
+            .collect();
+        Tensor::from_vec(v, (oc, ic, k, k), &Device::Cpu).unwrap()
+    }
+
+    #[test]
+    fn asymmetric_stride_h2_output_shape() {
+        let x = rand(1, 3, 8, 8);
+        let w = weight(4, 3, 3);
+        let y = conv2d_2d(&x, &w, None, (0, 0), (2, 1), 1).unwrap();
+        assert_eq!(
+            y.dims(),
+            &[1, 4, 3, 6],
+            "8x8 stride1->6x6, even rows -> 3x6"
+        );
+    }
+
+    #[test]
+    fn asymmetric_stride_w2_output_shape() {
+        let x = rand(1, 3, 8, 8);
+        let w = weight(4, 3, 3);
+        let y = conv2d_2d(&x, &w, None, (0, 0), (1, 2), 1).unwrap();
+        assert_eq!(
+            y.dims(),
+            &[1, 4, 6, 3],
+            "8x8 stride1->6x6, even cols -> 6x3"
+        );
+    }
+
+    #[test]
+    fn odd_dimensions_do_not_panic() {
+        // Regression: previously reshape(h/2, 2) panicked on odd H/W.
+        let x = rand(1, 3, 5, 6);
+        let w = weight(4, 3, 3);
+        let y = conv2d_2d(&x, &w, None, (0, 0), (2, 1), 1).unwrap();
+        assert_eq!(
+            y.dims(),
+            &[1, 4, 2, 4],
+            "5x6 stride1->3x4, even rows -> 2x4"
+        );
+        let y2 = conv2d_2d(&x, &w, None, (0, 0), (1, 2), 1).unwrap();
+        assert_eq!(
+            y2.dims(),
+            &[1, 4, 3, 2],
+            "5x6 stride1->3x4, even cols -> 3x2"
+        );
+    }
+
+    #[test]
+    fn asymmetric_stride_equals_subsampled_stride1() {
+        let x = rand(1, 3, 8, 8);
+        let w = weight(4, 3, 3);
+        let y = conv2d_2d(&x, &w, None, (1, 1), (2, 1), 1).unwrap();
+        // Reference: stride-1 conv then take even rows.
+        let s1 = conv2d_2d(&x, &w, None, (1, 1), (1, 1), 1).unwrap();
+        let h2 = s1.dims()[2].div_ceil(2);
+        let ref_y = s1
+            .reshape((1, 4, h2, 2, 8))
+            .unwrap()
+            .narrow(3, 0, 1)
+            .unwrap()
+            .squeeze(3)
+            .unwrap();
+        let d = (y - &ref_y).unwrap().abs().unwrap().max_all().unwrap();
+        assert!(d.to_scalar::<f32>().unwrap() < 1e-5, "diff {d:?}");
+    }
+
+    #[test]
+    fn asymmetric_padding_keeps_shape() {
+        let x = rand(1, 3, 6, 6);
+        let w = weight(4, 3, 3);
+        // pad_h=2, pad_w=0: (2,2) vs (0,0). Output height grows, width shrinks.
+        let y = conv2d_2d(&x, &w, None, (2, 0), (1, 1), 1).unwrap();
+        assert_eq!(y.dims(), &[1, 4, 8, 4]);
+    }
+}

@@ -90,7 +90,12 @@ impl ConvLayer {
             w.get(&format!("{prefix}.normalization.bias"))?,
             BN_EPS,
         )?;
-        Ok(Self { w: conv_w, b, bn, act })
+        Ok(Self {
+            w: conv_w,
+            b,
+            bn,
+            act,
+        })
     }
 
     /// Conv a `[N,C,H,W]` tensor with the given padding/stride/dilation.
@@ -142,7 +147,11 @@ impl ResidualBlock {
         downsample: bool,
     ) -> Result<Self, Error> {
         let conv_down = if downsample {
-            Some(ConvLayer::load(w, &format!("{prefix}.conv_down"), Act::None)?)
+            Some(ConvLayer::load(
+                w,
+                &format!("{prefix}.conv_down"),
+                Act::None,
+            )?)
         } else {
             None
         };
@@ -224,7 +233,8 @@ impl UVDoc {
         // ResNet head: 5×5 stride-2 convs (padding = kernel//2), ReLU.
         let mut resnet_head = Vec::with_capacity(resnet_head_cfg.len());
         for i in 0..resnet_head_cfg.len() {
-            let layer = ConvLayer::load(&w, &format!("backbone.resnet.resnet_head.{i}"), Act::Relu)?;
+            let layer =
+                ConvLayer::load(&w, &format!("backbone.resnet.resnet_head.{i}"), Act::Relu)?;
             resnet_head.push(layer);
         }
 
@@ -242,12 +252,7 @@ impl UVDoc {
                 let downsample = blk[3].as_bool().unwrap_or(false);
                 let prefix = format!("backbone.resnet.resnet_down.{si}.layers.{li}");
                 layers.push(ResidualBlock::load(
-                    &w,
-                    &prefix,
-                    in_c,
-                    out_c,
-                    dilation,
-                    downsample,
+                    &w, &prefix, in_c, out_c, dilation, downsample,
                 )?);
             }
             stages.push(layers);
@@ -277,8 +282,7 @@ impl UVDoc {
 
         // Head: 1×1 bridge connector (768→128, ReLU), 5×5 PReLU conv (reflect),
         // and the final 5×5 conv to a 2-channel grid.
-        let bridge_connector =
-            ConvLayer::load(&w, "head.bridge_connector", Act::Relu)?;
+        let bridge_connector = ConvLayer::load(&w, "head.bridge_connector", Act::Relu)?;
         let prelu_w = w.get("head.out_point_positions2D.conv_down.activation.weight")?;
         let out_down = ConvLayer::load(
             &w,
@@ -422,7 +426,11 @@ fn to_uvdoc_input(img: &DynamicImage, device: &Device) -> Result<Tensor, Error> 
         chw[2 * h * w + i] = p[2] as f32;
     }
     let resized = resize_align_corners(&chw, 3, h, w, UNWARP_HEIGHT, UNWARP_WIDTH);
-    Ok(Tensor::from_vec(resized, (1, 3, UNWARP_HEIGHT, UNWARP_WIDTH), device)?)
+    Ok(Tensor::from_vec(
+        resized,
+        (1, 3, UNWARP_HEIGHT, UNWARP_WIDTH),
+        device,
+    )?)
 }
 
 /// Bilinear `grid_sample` with `align_corners=true` and `padding_mode=zeros`,
@@ -460,10 +468,21 @@ pub fn grid_sample2d(input: &Tensor, grid: &Tensor) -> Result<Tensor, Error> {
             let in_x1 = x1 >= 0.0 && x1 <= iw - 1.0;
             let in_y0 = y0 >= 0.0 && y0 <= ih - 1.0;
             let in_y1 = y1 >= 0.0 && y1 <= ih - 1.0;
-            let (ix0, iy0) = (x0.clamp(0.0, iw - 1.0) as usize, y0.clamp(0.0, ih - 1.0) as usize);
-            let (ix1, iy1) = (x1.clamp(0.0, iw - 1.0) as usize, y1.clamp(0.0, ih - 1.0) as usize);
+            let (ix0, iy0) = (
+                x0.clamp(0.0, iw - 1.0) as usize,
+                y0.clamp(0.0, ih - 1.0) as usize,
+            );
+            let (ix1, iy1) = (
+                x1.clamp(0.0, iw - 1.0) as usize,
+                y1.clamp(0.0, ih - 1.0) as usize,
+            );
             for cc in 0..c {
-                let (b00, b01, b10, b11) = ((cc * h + iy0) * w + ix0, (cc * h + iy0) * w + ix1, (cc * h + iy1) * w + ix0, (cc * h + iy1) * w + ix1);
+                let (b00, b01, b10, b11) = (
+                    (cc * h + iy0) * w + ix0,
+                    (cc * h + iy0) * w + ix1,
+                    (cc * h + iy1) * w + ix0,
+                    (cc * h + iy1) * w + ix1,
+                );
                 let v00 = if in_x0 && in_y0 { inp[b00] } else { 0.0 };
                 let v01 = if in_x1 && in_y0 { inp[b01] } else { 0.0 };
                 let v10 = if in_x0 && in_y1 { inp[b10] } else { 0.0 };

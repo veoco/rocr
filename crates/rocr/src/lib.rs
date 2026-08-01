@@ -284,3 +284,63 @@ pub(crate) fn device_from_kind(kind: DeviceKind) -> Result<candle_core::Device, 
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn white_image(w: u32, h: u32) -> image::DynamicImage {
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            w,
+            h,
+            image::Rgb([255, 255, 255]),
+        ))
+    }
+
+    #[test]
+    fn crop_polygon_extracts_bounding_box() {
+        let img = white_image(10, 10);
+        let poly = [[2.0, 2.0], [6.0, 2.0], [6.0, 4.0], [2.0, 4.0]];
+        let crop = crop_polygon(&img, &poly).unwrap();
+        assert_eq!(crop.width(), 4, "crop width should span x∈[2,6)");
+        assert_eq!(crop.height(), 2, "crop height should span y∈[2,4)");
+    }
+
+    #[test]
+    fn crop_polygon_clamps_to_image_bounds() {
+        let img = white_image(10, 10);
+        // Polygon partially outside: the crop must clamp to the image edge.
+        let poly = [[-3.0, -2.0], [5.0, -2.0], [5.0, 3.0], [-3.0, 3.0]];
+        let crop = crop_polygon(&img, &poly).unwrap();
+        assert_eq!(crop.width(), 5, "clamped to x∈[0,5)");
+        assert_eq!(crop.height(), 3, "clamped to y∈[0,3)");
+    }
+
+    #[test]
+    fn crop_polygon_fully_outside_is_none() {
+        let img = white_image(10, 10);
+        let poly = [[20.0, 20.0], [21.0, 20.0], [21.0, 21.0], [20.0, 21.0]];
+        assert!(crop_polygon(&img, &poly).is_none());
+    }
+
+    #[test]
+    fn crop_polygon_empty_is_none() {
+        let img = white_image(10, 10);
+        let poly: Vec<[f32; 2]> = vec![];
+        assert!(crop_polygon(&img, &poly).is_none());
+    }
+
+    #[test]
+    fn device_kind_reports_unsupported_backends() {
+        #[cfg(not(feature = "cuda"))]
+        assert!(matches!(
+            device_from_kind(DeviceKind::Cuda),
+            Err(Error::UnsupportedBackend(_))
+        ));
+        #[cfg(not(feature = "metal"))]
+        assert!(matches!(
+            device_from_kind(DeviceKind::Metal),
+            Err(Error::UnsupportedBackend(_))
+        ));
+    }
+}

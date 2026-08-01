@@ -59,3 +59,55 @@ pub fn load_tensors(
     candle_core::safetensors::load(&path, device)
         .map_err(|e| Error::Safetensors(format!("{}: {e}", path.display())))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    fn tmp_repo() -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let d = std::env::temp_dir().join(format!(
+            "rocr_model_loader_test_{}_{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn missing_repo_file_is_model_file_missing() {
+        let repo = tmp_repo();
+        let err = read_repo_file(&repo, "config.json").unwrap_err();
+        assert!(matches!(err, Error::ModelFileMissing(_)));
+        assert!(err.to_string().contains("config.json"));
+    }
+
+    #[test]
+    fn invalid_json_is_config_error() {
+        let repo = tmp_repo();
+        fs::write(repo.join("config.json"), b"not json{").unwrap();
+        let err = load_json(&repo, CONFIG_FILE).unwrap_err();
+        assert!(matches!(err, Error::Config(_)));
+    }
+
+    #[test]
+    fn missing_weights_is_model_file_missing() {
+        let repo = tmp_repo();
+        let err = load_tensors(&repo, &candle_core::Device::Cpu).unwrap_err();
+        assert!(matches!(err, Error::ModelFileMissing(_)));
+        assert!(err.to_string().contains(WEIGHTS_FILE));
+    }
+
+    #[test]
+    fn repo_dir_builds_repo_path() {
+        assert_eq!(
+            repo_dir(Path::new("/m"), "small_rec"),
+            PathBuf::from("/m/PP-OCRv6_small_rec_safetensors")
+        );
+    }
+}

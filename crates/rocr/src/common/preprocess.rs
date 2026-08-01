@@ -281,4 +281,40 @@ mod tests {
         assert!((v[1] - expected_c1).abs() < 1e-4, "c1={}", v[1]);
         assert!((v[2] - expected_c2).abs() < 1e-4, "c2={}", v[2]);
     }
+
+    #[test]
+    fn rec_width_capped_at_3200() {
+        // Very wide + short crop: 5000x24 → round(48*5000/24) = 10000 → cap 3200.
+        let img = blank_img(5000, 24);
+        let (t, tw) = rec_preprocess(&img, &Device::Cpu).unwrap();
+        assert_eq!(tw, 3200);
+        assert_eq!(t.dims(), &[1, 3, 48, 3200]);
+    }
+
+    #[test]
+    fn rec_height_always_48() {
+        // Any aspect ratio must produce height exactly 48.
+        for (w, h) in [(60, 80), (100, 200), (37, 9)] {
+            let img = blank_img(w, h);
+            let (t, _) = rec_preprocess(&img, &Device::Cpu).unwrap();
+            assert_eq!(t.dims(), &[1, 3, 48, t.dims()[3]]);
+        }
+    }
+
+    #[test]
+    fn det_resize_dims_are_multiple_of_32() {
+        for &(h, w) in &[(200, 300), (100, 1000), (1, 1), (999, 777)] {
+            let (nh, nw) = det_resize_dims(h, w);
+            assert!(nh >= DET_MULTIPLE && nh % DET_MULTIPLE == 0, "nh={nh}");
+            assert!(nw >= DET_MULTIPLE && nw % DET_MULTIPLE == 0, "nw={nw}");
+        }
+    }
+
+    #[test]
+    fn det_resize_dims_respects_max_side() {
+        // 200x6000: min 200 < 736 → ratio up; but max 6000 exceeds 4000 limit.
+        let (nh, nw) = det_resize_dims(200, 6000);
+        assert!(nh <= DET_MAX_SIDE && nw <= DET_MAX_SIDE, "({nh},{nw})");
+        assert!(nh % DET_MULTIPLE == 0 && nw % DET_MULTIPLE == 0);
+    }
 }

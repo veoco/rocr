@@ -76,4 +76,50 @@ mod tests {
         let p = probs(&[&[0.8, 0.2, 0.0], &[0.9, 0.1, 0.0]]);
         assert!(ctc_greedy(&p).unwrap().ids.is_empty());
     }
+
+    #[test]
+    fn single_step_single_char() {
+        let p = probs(&[&[0.1, 0.9, 0.0]]);
+        let out = ctc_greedy(&p).unwrap();
+        assert_eq!(out.ids, vec![1]);
+        assert_eq!(out.confidences, vec![0.9]);
+    }
+
+    #[test]
+    fn leading_and_trailing_blanks_are_dropped() {
+        let p = probs(&[
+            &[0.9, 0.1, 0.0], // blank
+            &[0.1, 0.9, 0.0], // 'a'
+            &[0.9, 0.1, 0.0], // blank
+        ]);
+        assert_eq!(ctc_greedy(&p).unwrap().ids, vec![1]);
+    }
+
+    #[test]
+    fn repeats_split_by_blank_are_kept() {
+        // aa _ bb _ aa  → [a, b, a] (blank separates the repeats).
+        let p = probs(&[
+            &[0.1, 0.9, 0.0],
+            &[0.1, 0.9, 0.0],
+            &[0.9, 0.1, 0.0],
+            &[0.1, 0.0, 0.9],
+            &[0.1, 0.0, 0.9],
+            &[0.9, 0.1, 0.0],
+            &[0.1, 0.9, 0.0],
+            &[0.1, 0.9, 0.0],
+        ]);
+        assert_eq!(ctc_greedy(&p).unwrap().ids, vec![1, 2, 1]);
+    }
+
+    #[test]
+    fn adjacent_repeats_collapse() {
+        let p = probs(&[&[0.1, 0.9, 0.0], &[0.1, 0.9, 0.0], &[0.1, 0.9, 0.0]]);
+        assert_eq!(ctc_greedy(&p).unwrap().ids, vec![1]);
+    }
+
+    #[test]
+    fn empty_sequence_is_empty() {
+        let p = Tensor::from_vec(Vec::<f32>::new(), (0, 3), &Device::Cpu).unwrap();
+        assert!(ctc_greedy(&p).unwrap().ids.is_empty());
+    }
 }
